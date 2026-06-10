@@ -4,3 +4,8 @@ bin
 cmake*
 exp*
 debug
+lns
+CMakeFiles
+CMakeCache.txt
+Makefile
+test*

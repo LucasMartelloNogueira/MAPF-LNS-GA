@@ -15,7 +15,7 @@
 using namespace std::chrono;
 typedef std::chrono::high_resolution_clock Time;
 typedef std::chrono::duration<float> fsec;
-enum destroy_heuristic { RANDOMAGENTS, RANDOMWALK, INTERSECTION, DESTORY_COUNT };
+enum destroy_heuristic { RANDOMAGENTS, RANDOMWALK, INTERSECTION, GENETIC_ALGO, DESTORY_COUNT };
 
 struct Agent
 {
@@ -58,7 +58,8 @@ public:
     int num_of_failures = 0; // #replanning that fails to find any solutions
     LNS(const Instance& instance, double time_limit,
         string init_algo_name, string replan_algo_name, string destory_name,
-        int neighbor_size, int num_of_iterations, int screen, PIBTPPS_option pipp_option);
+        int neighbor_size, int num_of_iterations, int screen, PIBTPPS_option pipp_option,
+        int ga_pop_size = 8, int ga_gens = 3, double ga_mut_rate = 0.20);
 
     bool getInitialSolution();
     bool run();
@@ -99,6 +100,11 @@ private:
     vector<double> destroy_weights;
     int selected_neighbor;
 
+    // Genetic Algorithm parameters (configurable via CLI)
+    int ga_population_size = 8;
+    int ga_num_generations = 3;
+    double ga_mutation_rate = 0.20;
+
     bool runEECBS();
     bool runCBS();
     bool runPP();
@@ -116,6 +122,13 @@ private:
     bool generateNeighborByRandomWalk();
     //bool generateNeighborByStart();
     bool generateNeighborByIntersection(bool temporal = true);
+
+    // Genetic Algorithm destroy strategy
+    bool generateNeighborByGeneticAlgorithm(int population_size = -1, int num_generations = -1, double mutation_rate = -1);
+    vector<int> getAgentsByRandomWalkForGA();
+    vector<int> getAgentsByIntersectionForGA();
+    vector<int> getAgentsByRandomForGA(int seed);
+    int evaluateFitness(const vector<int>& individual);
 
     int findMostDelayedAgent();
     int findRandomAgent() const;

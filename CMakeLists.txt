@@ -1,7 +1,8 @@
+cmake_minimum_required(VERSION 3.10)
+
 project(lns)
 
-cmake_minimum_required (VERSION 2.6)
-set (CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 14)
 
 IF(NOT CMAKE_BUILD_TYPE)
     SET(CMAKE_BUILD_TYPE "RELEASE")
@@ -12,7 +13,12 @@ file(GLOB SOURCES "src/*.cpp" "src/CBS/*.cpp" "src/PIBT/*.cpp")
 add_executable(lns ${SOURCES})
 
 # Find Boost
-find_package(Boost REQUIRED COMPONENTS program_options system filesystem)
+set(Boost_NO_BOOST_CMAKE ON)
+
+find_package(Boost REQUIRED COMPONENTS
+    program_options
+    filesystem
+)
 
 # Find Eigen3 for PIBT
 find_package (Eigen3 3.3 REQUIRED NO_MODULE)
