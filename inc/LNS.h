@@ -56,6 +56,7 @@ public:
     int sum_of_distances = -1;
     double average_group_size = -1;
     int num_of_failures = 0; // #replanning that fails to find any solutions
+    bool success = false;
     LNS(const Instance& instance, double time_limit,
         string init_algo_name, string replan_algo_name, string destory_name,
         int neighbor_size, int num_of_iterations, int screen, PIBTPPS_option pipp_option,
@@ -77,6 +78,7 @@ private:
     double replan_time_limit; // time limit for replanning
     string init_algo_name;
     string replan_algo_name;
+    string destory_name;
     int screen;
     destroy_heuristic destroy_strategy = RANDOMWALK;
     int neighbor_size;

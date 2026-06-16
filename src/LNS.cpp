@@ -6,14 +6,14 @@ LNS::LNS(const Instance& instance, double time_limit, string init_algo_name, str
          int neighbor_size, int num_of_iterations, int screen, PIBTPPS_option pipp_option,
          int ga_pop_size, int ga_gens, double ga_mut_rate) :
          instance(instance), time_limit(time_limit), init_algo_name(std::move(init_algo_name)),
-         replan_algo_name(replan_algo_name), neighbor_size(neighbor_size), num_of_iterations(num_of_iterations),
+         replan_algo_name(replan_algo_name), destory_name(destory_name), neighbor_size(neighbor_size), num_of_iterations(num_of_iterations),
          screen(screen), path_table(instance.map_size),pipp_option(pipp_option), replan_time_limit(time_limit / 100)
 {
     start_time = Time::now();
     if (destory_name == "Adaptive")
     {
         ALNS = true;
-        destroy_weights.assign(DESTORY_COUNT * num_neighbor_sizes, 1);
+        destroy_weights.assign((DESTORY_COUNT - 1) * num_neighbor_sizes, 1);
     }
     else if (destory_name == "RandomWalk")
         destroy_strategy = RANDOMWALK;
@@ -45,6 +45,8 @@ LNS::LNS(const Instance& instance, double time_limit, string init_algo_name, str
 
 bool LNS::run()
 {
+    success = false;
+
     // only for statistic analysis, and thus is not included in runtime
     sum_of_distances = 0;
     for (const auto & agent : agents)
@@ -170,6 +172,7 @@ bool LNS::run()
          << "runtime = " << runtime << ", "
          << "group size = " << average_group_size << ", "
          << "failed iterations = " << num_of_failures << endl;
+    success = true;
     return true;
 }
 
@@ -543,7 +546,6 @@ void LNS::chooseDestroyHeuristicbyALNS(){
         case 0 : destroy_strategy = RANDOMWALK; break;
         case 1 : destroy_strategy = INTERSECTION; break;
         case 2 : destroy_strategy = RANDOMAGENTS; break;
-        case 3 : destroy_strategy = GENETIC_ALGO; break;
         default : cerr << "ERROR" << endl; exit(-1);
     }
     // neighbor_size = (int) pow(2, selected_neighbor % num_neighbor_sizes + 1);
@@ -1108,18 +1110,50 @@ void LNS::writeIterStatsToFile(string file_name) const {
 }
 
 void LNS::writeResultToFile(string file_name) const {
+    const string result_header = "runtime,solution cost,initial solution cost,min f value,root g value,"
+                                 "iterations,group size,runtime of initial solution,area under curve,"
+                                 "preprocessing runtime,solver name,instance name,"
+                                 "agents,destoryStrategy,gaPopSize,gaGenerations,gaMutationRate,"
+                                 "failed iterations,neighborSize,success,"
+                                 "time limit,initAlgo,replanAlgo";
     std::ifstream infile(file_name);
     bool exist = infile.good();
-    infile.close();
     if (!exist)
     {
+        infile.close();
         ofstream addHeads(file_name);
-        addHeads << "runtime,solution cost,initial solution cost,min f value,root g value," <<
-                 "iterations," <<
-                 "group size," <<
-                 "runtime of initial solution,area under curve," <<
-                 "preprocessing runtime,solver name,instance name" << endl;
+        addHeads << result_header << endl;
         addHeads.close();
+    }
+    else
+    {
+        string header;
+        getline(infile, header);
+        if (header != result_header)
+        {
+            int num_existing_columns = header.empty() ? 0 : (int)std::count(header.begin(), header.end(), ',') + 1;
+            int num_result_columns = (int)std::count(result_header.begin(), result_header.end(), ',') + 1;
+            vector<string> existing_rows;
+            string row;
+            while (getline(infile, row))
+                existing_rows.push_back(row);
+            infile.close();
+
+            ofstream updated(file_name);
+            updated << result_header << endl;
+            for (const auto& existing_row : existing_rows)
+            {
+                updated << existing_row;
+                for (int i = num_existing_columns; !existing_row.empty() && i < num_result_columns; i++)
+                    updated << ",-";
+                updated << endl;
+            }
+            updated.close();
+        }
+        else
+        {
+            infile.close();
+        }
     }
     ofstream stats(file_name, std::ios::app);
     double auc = 0;
@@ -1140,7 +1174,18 @@ void LNS::writeResultToFile(string file_name) const {
             max(sum_of_distances, sum_of_costs_lowerbound) << "," << sum_of_distances << "," <<
             iteration_stats.size() << "," << average_group_size << "," <<
             initial_solution_runtime << "," << auc << "," <<
-            preprocessing_time << "," << getSolverName() << "," << instance.getInstanceName() << endl;
+            preprocessing_time << "," << getSolverName() << "," << instance.getInstanceName() << "," <<
+            instance.getDefaultNumberOfAgents() << "," << destory_name << ",";
+    if (destory_name == "GeneticAlgo")
+    {
+        stats << ga_population_size << "," << ga_num_generations << "," << ga_mutation_rate << ",";
+    }
+    else
+    {
+        stats << "-,-,-,";
+    }
+    stats << num_of_failures << "," << neighbor_size << "," << (success ? "true" : "false") << "," <<
+            time_limit << "," << init_algo_name << "," << replan_algo_name << endl;
     stats.close();
 }
 

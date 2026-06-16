@@ -6,7 +6,14 @@
 
 ## rodando experimento
 
+### random-32-32-20
+
     ./lns -m random-32-32-20.map -a random-32-32-20-random-1.scen -o test2.csv -k 50 -t 60 --destoryStrategy GeneticAlgo --gaPopSize 8 --gaGenerations 3 --gaMutationRate 0.20
+
+### den520d
+
+    ./lns -m maps-scen/den520d/den520d.map -a maps-scen/den520d/den520d.map-scen-random/scen-random/den520d-random-1.scen -o test2.csv -k 50 -t 60 --destoryStrategy GeneticAlgo --gaPopSize 8 --gaGenerations 3 --gaMutationRate 0.20
+
 
 ## criar make 
 
