@@ -668,129 +668,84 @@ bool LNS::generateNeighborByRandomWalk(){
     return true;
 }
 
+
 bool LNS::generateNeighborByGeneticAlgorithm(int population_size, int num_generations, double mutation_rate) {
     const int POP_SIZE = (population_size > 0) ? population_size : ga_population_size;
     const int NUM_GENERATIONS = (num_generations > 0) ? num_generations : ga_num_generations;
     const double MUTATION_RATE = (mutation_rate >= 0) ? mutation_rate : ga_mutation_rate;
 
-    // 1. Gerar população inicial (POP_SIZE indivíduos)
     vector<vector<int>> population;
-
-    // 1 indivíduo via random walk adaptado
     population.push_back(getAgentsByRandomWalkForGA());
-
-    // 1 indivíduo via intersection adaptado
     population.push_back(getAgentsByIntersectionForGA());
-
-    // Restante: indivíduos aleatórios com seeds diferentes
     for (int seed = 0; seed < POP_SIZE - 2; seed++) {
         population.push_back(getAgentsByRandomForGA(seed));
     }
 
-    // 2. Loop evolutivo
-    for (int gen = 0; gen < NUM_GENERATIONS; gen++) {
-        // 2a. Avaliar fitness de cada indivíduo
-        vector<pair<int, int>> fitness_scores; // (fitness, index)
+    if (population.empty())
+        return false;
+
+    int best_idx = 0;
+    for (int gen = 0; gen <= NUM_GENERATIONS; gen++) {
+        vector<pair<int, int>> fitness_scores;
+        fitness_scores.reserve(population.size());
         for (int i = 0; i < (int)population.size(); i++) {
             int fitness = evaluateFitness(population[i]);
             fitness_scores.push_back({fitness, i});
         }
-
-        // 2b. Ordenar por fitness (menor sum_of_costs = melhor)
         sort(fitness_scores.begin(), fitness_scores.end());
+        best_idx = fitness_scores.front().second;
 
-        // 2c. Seleção para crossover: usar os 4 mais aptos como pais
-        vector<vector<int>> parents;
-        for (int i = 0; i < 4 && i < (int)fitness_scores.size(); i++) {
-            parents.push_back(population[fitness_scores[i].second]);
-        }
+        if (gen == NUM_GENERATIONS)
+            break;
 
-        // 2d. Crossover por ponto de corte para gerar 4 novos filhos
-        vector<vector<int>> children;
-        for (int i = 0; i + 1 < (int)parents.size(); i += 2) {
-            auto& parent1 = parents[i];
-            auto& parent2 = parents[i + 1];
+        const int child_count = min(4, (int)population.size() / 2);
+        for (int i = 0; i < child_count; i++) {
+            const auto& parent_best = population[fitness_scores[i].second];
+            const int worst_idx = fitness_scores[fitness_scores.size() - 1 - i].second;
+            const auto& parent_worst = population[worst_idx];
 
-            int cut_point = rand() % min(parent1.size(), parent2.size());
+            vector<int> child;
+            set<int> child_set;
+            int min_parent_size = min(parent_best.size(), parent_worst.size());
+            int cut_point = (min_parent_size > 0) ? rand() % min_parent_size : -1;
 
-            vector<int> child1, child2;
-            set<int> child1_set, child2_set;
-
-            // Primeira parte do parent1 para child1
-            for (int j = 0; j <= cut_point && j < (int)parent1.size(); j++) {
-                child1.push_back(parent1[j]);
-                child1_set.insert(parent1[j]);
+            for (int j = 0; j <= cut_point && j < (int)parent_best.size(); j++) {
+                child.push_back(parent_best[j]);
+                child_set.insert(parent_best[j]);
             }
-            // Complementar com parent2 (sem duplicados)
-            for (int j = 0; j < (int)parent2.size() && (int)child1.size() < neighbor_size; j++) {
-                if (child1_set.find(parent2[j]) == child1_set.end()) {
-                    child1.push_back(parent2[j]);
-                    child1_set.insert(parent2[j]);
+            for (int j = 0; j < (int)parent_worst.size() && (int)child.size() < neighbor_size; j++) {
+                if (child_set.find(parent_worst[j]) == child_set.end()) {
+                    child.push_back(parent_worst[j]);
+                    child_set.insert(parent_worst[j]);
                 }
             }
-
-            // Primeira parte do parent2 para child2
-            for (int j = 0; j <= cut_point && j < (int)parent2.size(); j++) {
-                child2.push_back(parent2[j]);
-                child2_set.insert(parent2[j]);
-            }
-            // Complementar com parent1 (sem duplicados)
-            for (int j = 0; j < (int)parent1.size() && (int)child2.size() < neighbor_size; j++) {
-                if (child2_set.find(parent1[j]) == child2_set.end()) {
-                    child2.push_back(parent1[j]);
-                    child2_set.insert(parent1[j]);
-                }
-            }
-
-            children.push_back(child1);
-            children.push_back(child2);
+            population[worst_idx] = child;
         }
 
-        // 2e. Mutação nos filhos
-        for (int i = 0; i < (int)children.size(); i++) {
-            for (int j = 0; j < (int)children[i].size(); j++) {
+        for (int i = 0; i < (int)population.size(); i++) {
+            if (i == best_idx)
+                continue;
+
+            set<int> current_set(population[i].begin(), population[i].end());
+            for (int j = 0; j < (int)population[i].size(); j++) {
                 if ((double)rand() / RAND_MAX < MUTATION_RATE) {
+                    int previous_agent = population[i][j];
+                    current_set.erase(previous_agent);
                     int new_agent = rand() % agents.size();
-                    set<int> current_set(children[i].begin(), children[i].end());
                     int attempts = 0;
                     while (current_set.count(new_agent) > 0 && attempts < 20) {
                         new_agent = rand() % agents.size();
                         attempts++;
                     }
                     if (current_set.count(new_agent) == 0) {
-                        children[i][j] = new_agent;
+                        population[i][j] = new_agent;
+                        current_set.insert(new_agent);
+                    }
+                    else {
+                        current_set.insert(previous_agent);
                     }
                 }
             }
-        }
-
-        // 2f. Manter população constante: adicionar filhos e remover os piores
-        for (auto& child : children) {
-            population.push_back(child);
-        }
-        // Reavaliar fitness de toda a população
-        vector<pair<int, int>> full_fitness;
-        for (int i = 0; i < (int)population.size(); i++) {
-            int f = evaluateFitness(population[i]);
-            full_fitness.push_back({f, i});
-        }
-        sort(full_fitness.begin(), full_fitness.end());
-        // Manter apenas os POP_SIZE melhores
-        vector<vector<int>> surviving_population;
-        for (int i = 0; i < POP_SIZE && i < (int)full_fitness.size(); i++) {
-            surviving_population.push_back(population[full_fitness[i].second]);
-        }
-        population = surviving_population;
-    }
-
-    // 3. Selecionar o melhor indivíduo da população final
-    int best_fitness = INT_MAX;
-    int best_idx = 0;
-    for (int i = 0; i < (int)population.size(); i++) {
-        int fitness = evaluateFitness(population[i]);
-        if (fitness < best_fitness) {
-            best_fitness = fitness;
-            best_idx = i;
         }
     }
 
@@ -802,6 +757,7 @@ bool LNS::generateNeighborByGeneticAlgorithm(int population_size, int num_genera
         cout << "Generate " << neighbor.agents.size() << " neighbors by genetic algorithm" << endl;
     return true;
 }
+
 
 vector<int> LNS::getAgentsByRandomWalkForGA() {
     if (neighbor_size >= (int)agents.size()) {
