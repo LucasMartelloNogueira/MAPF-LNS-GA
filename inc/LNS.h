@@ -2,6 +2,7 @@
 #include "ECBS.h"
 #include "SpaceTimeAStar.h"
 #include <chrono>
+#include <thread>
 #include <utility>
 
 //pibt related
@@ -15,7 +16,7 @@
 using namespace std::chrono;
 typedef std::chrono::high_resolution_clock Time;
 typedef std::chrono::duration<float> fsec;
-enum destroy_heuristic { RANDOMAGENTS, RANDOMWALK, INTERSECTION, GENETIC_ALGO, DESTORY_COUNT };
+enum destroy_heuristic { RANDOMAGENTS, RANDOMWALK, INTERSECTION, GENETIC_ALGO, GENETIC_ALGO_PARALLEL, DESTORY_COUNT };
 
 struct Agent
 {
@@ -54,13 +55,15 @@ public:
     int sum_of_costs = -1;
     int sum_of_costs_lowerbound = -1;
     int sum_of_distances = -1;
+    int makespan = -1;
     double average_group_size = -1;
     int num_of_failures = 0; // #replanning that fails to find any solutions
     bool success = false;
     LNS(const Instance& instance, double time_limit,
         string init_algo_name, string replan_algo_name, string destory_name,
         int neighbor_size, int num_of_iterations, int screen, PIBTPPS_option pipp_option,
-        int ga_pop_size = 8, int ga_gens = 3, double ga_mut_rate = 0.20);
+        int ga_pop_size = 8, int ga_gens = 3, double ga_mut_rate = 0.20,
+        int num_threads = 1);
 
     bool getInitialSolution();
     bool run();
@@ -106,6 +109,7 @@ private:
     int ga_population_size = 8;
     int ga_num_generations = 3;
     double ga_mutation_rate = 0.20;
+    int num_threads = 1;
 
     bool runEECBS();
     bool runCBS();
@@ -127,10 +131,14 @@ private:
 
     // Genetic Algorithm destroy strategy
     bool generateNeighborByGeneticAlgorithm(int population_size = -1, int num_generations = -1, double mutation_rate = -1);
+    bool generateNeighborByGeneticAlgorithmParallel(int population_size = -1, int num_generations = -1,
+                                                    double mutation_rate = -1, int num_threads = -1);
     vector<int> getAgentsByRandomWalkForGA();
     vector<int> getAgentsByIntersectionForGA();
     vector<int> getAgentsByRandomForGA(int seed);
     int evaluateFitness(const vector<int>& individual);
+    int evaluateFitnessThreadSafe(const vector<int>& individual) const;
+    void updateMakespan();
 
     int findMostDelayedAgent();
     int findRandomAgent() const;

@@ -22,7 +22,8 @@ find_package(Boost REQUIRED COMPONENTS
 
 # Find Eigen3 for PIBT
 find_package (Eigen3 3.3 REQUIRED NO_MODULE)
+find_package(Threads REQUIRED)
 
 
 include_directories( ${Boost_INCLUDE_DIRS} )
-target_link_libraries(lns ${Boost_LIBRARIES} Eigen3::Eigen)
+target_link_libraries(lns ${Boost_LIBRARIES} Eigen3::Eigen Threads::Threads)

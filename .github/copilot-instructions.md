@@ -21,6 +21,23 @@
     - Save the document in the folder `specs/{id}-{title}/plan.md` for easy access and review
       by other team members.
 
+  5. Save prompt
+    - store the user prompt in a section called "prompt". 
+    - the prompt saved must be the entire prompt given by the user and without any modifications
+  
+  6. Save data for audit
+    - the first thing saved in each plan is a datetime of when if was created, the author (the user loged in vscode / copilot) and the time it was last updated
+
+  7. Save alterations to the plan
+    - after the user makes adjustments to the plan, save the adjustments in a section called "adjusments"
+    - The "adjustments" must contain subsections named "adjustment 1" for the first correction, "adjustment 2" for the second correction and so on
+    - Each subsection "ajustment x" must contain the datetime of the correction, the whole prompt given by the user, without any modifications, and a list with what changed with before and after values
+    - Modify the last updated field in the plan after each adjustment
+
+  8. Get context
+    - before reading the user prompt, read the files `mapf.md` to get context of the problem and then read the file `mapf-lns.md` to get the context of the solution proposed in this codebase
+
+
 - Any time that you need to create a spec.md file for a new feature, follow the instructions below:
   
   1. Requirement gathering
@@ -56,6 +73,15 @@
     - Document any new components, hooks, or significant changes made during the implementation
       for future reference and maintenance.
     - Use a directory called `docs/` at the root of the project to store documentation files.
+  
+  5. Save data for audit
+    - the first thing saved in each plan is a datetime of when if was created, the author (the user loged in vscode / copilot), the time it was last updated and the AI model used
+
+  6. Save alterations to the plan
+    - after the user makes adjustments to the plan, save the adjustments in a section called "adjusments"
+    - The "adjustments" must contain subsections named "adjustment 1" for the first correction, "adjustment 2" for the second correction and so on
+    - Each subsection "ajustment x" must contain the datetime of the correction, the whole prompt given by the user, without any modifications, and a list with what changed with before and after values
+    - Modify the last updated field in the plan after each adjustment
 
 - Any time that you need to create some feature, use the generate plans and spec files previously generated as reference !!!.
 

@@ -1,6 +1,22 @@
 ﻿#pragma once
 #include "Instance.h"
 #include "ConstraintTable.h"
+#include <functional>
+#include <random>
+#include <thread>
+
+inline bool threadSeededTieBreak(int lhs_location, int rhs_location, int lhs_timestep, int rhs_timestep)
+{
+	const auto tid_hash = std::hash<std::thread::id>{}(std::this_thread::get_id());
+	const unsigned int seed = static_cast<unsigned int>(
+			tid_hash ^
+			(static_cast<size_t>(lhs_location) * 73856093u) ^
+			(static_cast<size_t>(rhs_location) * 19349663u) ^
+			(static_cast<size_t>(lhs_timestep) * 83492791u) ^
+			(static_cast<size_t>(rhs_timestep) * 2654435761u));
+	std::mt19937 rng(seed);
+	return (rng() & 1u) == 0u;
+}
 
 class LLNode // low-level node
 {
@@ -23,7 +39,7 @@ public:
             {
                 if (n1->h_val == n2->h_val)
                 {
-                    return rand() % 2 == 0;   // break ties randomly
+					return rand() % 2 == 0;   // break ties randomly
                 }
                 return n1->h_val >= n2->h_val;  // break ties towards smaller h_vals (closer to goal location)
             }
@@ -42,7 +58,7 @@ public:
                 {
                     if (n1->h_val == n2->h_val)
                     {
-                        return rand() % 2 == 0;   // break ties randomly
+						return rand() % 2 == 0;   // break ties randomly
                     }
                     return n1->h_val >= n2->h_val;  // break ties towards smaller h_vals (closer to goal location)
                 }

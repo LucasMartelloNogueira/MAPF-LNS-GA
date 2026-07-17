@@ -1,10 +1,13 @@
 #include "LNS.h"
+#include <algorithm>
+#include <climits>
 #include <queue>
 #include <random>
+#include <thread>
 
 LNS::LNS(const Instance& instance, double time_limit, string init_algo_name, string replan_algo_name, string destory_name,
          int neighbor_size, int num_of_iterations, int screen, PIBTPPS_option pipp_option,
-         int ga_pop_size, int ga_gens, double ga_mut_rate) :
+         int ga_pop_size, int ga_gens, double ga_mut_rate, int num_threads) :
          instance(instance), time_limit(time_limit), init_algo_name(std::move(init_algo_name)),
          replan_algo_name(replan_algo_name), destory_name(destory_name), neighbor_size(neighbor_size), num_of_iterations(num_of_iterations),
          screen(screen), path_table(instance.map_size),pipp_option(pipp_option), replan_time_limit(time_limit / 100)
@@ -13,7 +16,7 @@ LNS::LNS(const Instance& instance, double time_limit, string init_algo_name, str
     if (destory_name == "Adaptive")
     {
         ALNS = true;
-        destroy_weights.assign((DESTORY_COUNT - 1) * num_neighbor_sizes, 1);
+        destroy_weights.assign(3 * num_neighbor_sizes, 1);
     }
     else if (destory_name == "RandomWalk")
         destroy_strategy = RANDOMWALK;
@@ -23,6 +26,8 @@ LNS::LNS(const Instance& instance, double time_limit, string init_algo_name, str
         destroy_strategy = RANDOMAGENTS;
     else if (destory_name == "GeneticAlgo")
         destroy_strategy = GENETIC_ALGO;
+    else if (destory_name == "GeneticAlgoParallel")
+        destroy_strategy = GENETIC_ALGO_PARALLEL;
     else
     {
         cerr << "Destroy heuristic " << destory_name << " does not exists. " << endl;
@@ -33,6 +38,7 @@ LNS::LNS(const Instance& instance, double time_limit, string init_algo_name, str
     if (ga_pop_size > 0) ga_population_size = ga_pop_size;
     if (ga_gens > 0) ga_num_generations = ga_gens;
     if (ga_mut_rate >= 0) ga_mutation_rate = ga_mut_rate;
+    this->num_threads = std::max(1, num_threads);
 
     int N = instance.getDefaultNumberOfAgents();
     agents.reserve(N);
@@ -69,8 +75,10 @@ bool LNS::run()
     runtime = initial_solution_runtime;
     if (succ)
     {
+        updateMakespan();
         if (screen >= 1)
             cout << "Initial solution cost = " << initial_sum_of_costs << ", "
+                 << "makespan = " << makespan << ", "
                  << "runtime = " << initial_solution_runtime << endl;
     }
     else
@@ -108,7 +116,17 @@ bool LNS::run()
                 succ = true;
                 break;
             case GENETIC_ALGO:
-                succ = generateNeighborByGeneticAlgorithm();
+                succ = generateNeighborByGeneticAlgorithm(
+                        ga_population_size,
+                        ga_num_generations,
+                        ga_mutation_rate);
+                break;
+            case GENETIC_ALGO_PARALLEL:
+                succ = generateNeighborByGeneticAlgorithmParallel(
+                        ga_population_size,
+                        ga_num_generations,
+                        ga_mutation_rate,
+                        num_threads);
                 break;
             default:
                 cerr << "Wrong neighbor generation strategy" << endl;
@@ -152,10 +170,12 @@ bool LNS::run()
         }
         runtime = ((fsec)(Time::now() - start_time)).count();
         sum_of_costs += neighbor.sum_of_costs - neighbor.old_sum_of_costs;
+        updateMakespan();
         if (screen >= 1)
             cout << "Iteration " << iteration_stats.size() << ", "
                  << "group size = " << neighbor.agents.size() << ", "
                  << "solution cost = " << sum_of_costs << ", "
+                 << "makespan = " << makespan << ", "
                  << "remaining time = " << time_limit - runtime << endl;
         iteration_stats.emplace_back(neighbor.agents.size(), sum_of_costs, runtime, replan_algo_name);
     }
@@ -673,39 +693,136 @@ bool LNS::generateNeighborByGeneticAlgorithm(int population_size, int num_genera
     const int NUM_GENERATIONS = (num_generations > 0) ? num_generations : ga_num_generations;
     const double MUTATION_RATE = (mutation_rate >= 0) ? mutation_rate : ga_mutation_rate;
 
-    // 1. Gerar população inicial (POP_SIZE indivíduos)
     vector<vector<int>> population;
-
-    // 1 indivíduo via random walk adaptado
     population.push_back(getAgentsByRandomWalkForGA());
-
-    // 1 indivíduo via intersection adaptado
     population.push_back(getAgentsByIntersectionForGA());
-
-    // Restante: indivíduos aleatórios com seeds diferentes
     for (int seed = 0; seed < POP_SIZE - 2; seed++) {
         population.push_back(getAgentsByRandomForGA(seed));
     }
 
-    // 2. Loop evolutivo
-    for (int gen = 0; gen < NUM_GENERATIONS; gen++) {
-        // 2a. Avaliar fitness de cada indivíduo
-        vector<pair<int, int>> fitness_scores; // (fitness, index)
+    if (population.empty())
+        return false;
+
+    int best_idx = 0;
+    for (int gen = 0; gen <= NUM_GENERATIONS; gen++) {
+        vector<pair<int, int>> fitness_scores;
+        fitness_scores.reserve(population.size());
         for (int i = 0; i < (int)population.size(); i++) {
             int fitness = evaluateFitness(population[i]);
             fitness_scores.push_back({fitness, i});
         }
-
-        // 2b. Ordenar por fitness (menor sum_of_costs = melhor)
         sort(fitness_scores.begin(), fitness_scores.end());
+        best_idx = fitness_scores.front().second;
 
-        // 2c. Seleção para crossover: usar os 4 mais aptos como pais
-        vector<vector<int>> parents;
-        for (int i = 0; i < 4 && i < (int)fitness_scores.size(); i++) {
-            parents.push_back(population[fitness_scores[i].second]);
+        if (gen == NUM_GENERATIONS)
+            break;
+
+        const int child_count = min(4, (int)population.size() / 2);
+        for (int i = 0; i < child_count; i++) {
+            const auto& parent_best = population[fitness_scores[i].second];
+            const int worst_idx = fitness_scores[fitness_scores.size() - 1 - i].second;
+            const auto& parent_worst = population[worst_idx];
+
+            vector<int> child;
+            set<int> child_set;
+            int min_parent_size = min(parent_best.size(), parent_worst.size());
+            int cut_point = (min_parent_size > 0) ? rand() % min_parent_size : -1;
+
+            for (int j = 0; j <= cut_point && j < (int)parent_best.size(); j++) {
+                child.push_back(parent_best[j]);
+                child_set.insert(parent_best[j]);
+            }
+            for (int j = 0; j < (int)parent_worst.size() && (int)child.size() < neighbor_size; j++) {
+                if (child_set.find(parent_worst[j]) == child_set.end()) {
+                    child.push_back(parent_worst[j]);
+                    child_set.insert(parent_worst[j]);
+                }
+            }
+            population[worst_idx] = child;
         }
 
-        // 2d. Crossover por ponto de corte para gerar 4 novos filhos
+        for (int i = 0; i < (int)population.size(); i++) {
+            if (i == best_idx)
+                continue;
+
+            set<int> current_set(population[i].begin(), population[i].end());
+            for (int j = 0; j < (int)population[i].size(); j++) {
+                if ((double)rand() / RAND_MAX < MUTATION_RATE) {
+                    int previous_agent = population[i][j];
+                    current_set.erase(previous_agent);
+                    int new_agent = rand() % agents.size();
+                    int attempts = 0;
+                    while (current_set.count(new_agent) > 0 && attempts < 20) {
+                        new_agent = rand() % agents.size();
+                        attempts++;
+                    }
+                    if (current_set.count(new_agent) == 0) {
+                        population[i][j] = new_agent;
+                        current_set.insert(new_agent);
+                    }
+                    else {
+                        current_set.insert(previous_agent);
+                    }
+                }
+            }
+        }
+    }
+
+    neighbor.agents = population[best_idx];
+    if (neighbor.agents.empty())
+        return false;
+
+    if (screen >= 2)
+        cout << "Generate " << neighbor.agents.size() << " neighbors by genetic algorithm" << endl;
+    return true;
+}
+
+bool LNS::generateNeighborByGeneticAlgorithmParallel(int population_size, int num_generations,
+                                                     double mutation_rate, int requested_num_threads) {
+    const int POP_SIZE = (population_size > 0) ? population_size : ga_population_size;
+    const int NUM_GENERATIONS = (num_generations > 0) ? num_generations : ga_num_generations;
+    const double MUTATION_RATE = (mutation_rate >= 0) ? mutation_rate : ga_mutation_rate;
+    const int requested_threads = (requested_num_threads > 0) ? requested_num_threads : num_threads;
+
+    vector<vector<int>> population;
+    population.push_back(getAgentsByRandomWalkForGA());
+    population.push_back(getAgentsByIntersectionForGA());
+    for (int seed = 0; seed < POP_SIZE - 2; seed++) {
+        population.push_back(getAgentsByRandomForGA(seed));
+    }
+
+    auto evaluate_population = [&](const vector<vector<int>>& current_population) {
+        vector<int> fitness(current_population.size(), INT_MAX);
+        const int worker_count = std::max(1, std::min(requested_threads, (int)current_population.size()));
+        vector<std::thread> workers;
+        workers.reserve(worker_count);
+
+        for (int worker = 0; worker < worker_count; worker++)
+        {
+            int begin = worker * (int) current_population.size() / worker_count;
+            int end = (worker + 1) * (int) current_population.size() / worker_count;
+            workers.emplace_back([&, begin, end]() {
+                for (int idx = begin; idx < end; idx++)
+                    fitness[idx] = evaluateFitnessThreadSafe(current_population[idx]);
+            });
+        }
+        for (auto& worker : workers)
+            worker.join();
+        return fitness;
+    };
+
+    for (int gen = 0; gen < NUM_GENERATIONS; gen++) {
+        auto fitness_values = evaluate_population(population);
+        vector<pair<int, int>> fitness_scores;
+        fitness_scores.reserve(population.size());
+        for (int i = 0; i < (int)population.size(); i++)
+            fitness_scores.emplace_back(fitness_values[i], i);
+        sort(fitness_scores.begin(), fitness_scores.end());
+
+        vector<vector<int>> parents;
+        for (int i = 0; i < 4 && i < (int)fitness_scores.size(); i++)
+            parents.push_back(population[fitness_scores[i].second]);
+
         vector<vector<int>> children;
         for (int i = 0; i + 1 < (int)parents.size(); i += 2) {
             auto& parent1 = parents[i];
@@ -716,12 +833,10 @@ bool LNS::generateNeighborByGeneticAlgorithm(int population_size, int num_genera
             vector<int> child1, child2;
             set<int> child1_set, child2_set;
 
-            // Primeira parte do parent1 para child1
             for (int j = 0; j <= cut_point && j < (int)parent1.size(); j++) {
                 child1.push_back(parent1[j]);
                 child1_set.insert(parent1[j]);
             }
-            // Complementar com parent2 (sem duplicados)
             for (int j = 0; j < (int)parent2.size() && (int)child1.size() < neighbor_size; j++) {
                 if (child1_set.find(parent2[j]) == child1_set.end()) {
                     child1.push_back(parent2[j]);
@@ -729,12 +844,10 @@ bool LNS::generateNeighborByGeneticAlgorithm(int population_size, int num_genera
                 }
             }
 
-            // Primeira parte do parent2 para child2
             for (int j = 0; j <= cut_point && j < (int)parent2.size(); j++) {
                 child2.push_back(parent2[j]);
                 child2_set.insert(parent2[j]);
             }
-            // Complementar com parent1 (sem duplicados)
             for (int j = 0; j < (int)parent1.size() && (int)child2.size() < neighbor_size; j++) {
                 if (child2_set.find(parent1[j]) == child2_set.end()) {
                     child2.push_back(parent1[j]);
@@ -746,7 +859,6 @@ bool LNS::generateNeighborByGeneticAlgorithm(int population_size, int num_genera
             children.push_back(child2);
         }
 
-        // 2e. Mutação nos filhos
         for (int i = 0; i < (int)children.size(); i++) {
             for (int j = 0; j < (int)children[i].size(); j++) {
                 if ((double)rand() / RAND_MAX < MUTATION_RATE) {
@@ -757,39 +869,34 @@ bool LNS::generateNeighborByGeneticAlgorithm(int population_size, int num_genera
                         new_agent = rand() % agents.size();
                         attempts++;
                     }
-                    if (current_set.count(new_agent) == 0) {
+                    if (current_set.count(new_agent) == 0)
                         children[i][j] = new_agent;
-                    }
                 }
             }
         }
 
-        // 2f. Manter população constante: adicionar filhos e remover os piores
-        for (auto& child : children) {
+        for (auto& child : children)
             population.push_back(child);
-        }
-        // Reavaliar fitness de toda a população
+
+        auto full_fitness_values = evaluate_population(population);
         vector<pair<int, int>> full_fitness;
-        for (int i = 0; i < (int)population.size(); i++) {
-            int f = evaluateFitness(population[i]);
-            full_fitness.push_back({f, i});
-        }
+        full_fitness.reserve(population.size());
+        for (int i = 0; i < (int)population.size(); i++)
+            full_fitness.emplace_back(full_fitness_values[i], i);
         sort(full_fitness.begin(), full_fitness.end());
-        // Manter apenas os POP_SIZE melhores
+
         vector<vector<int>> surviving_population;
-        for (int i = 0; i < POP_SIZE && i < (int)full_fitness.size(); i++) {
+        for (int i = 0; i < POP_SIZE && i < (int)full_fitness.size(); i++)
             surviving_population.push_back(population[full_fitness[i].second]);
-        }
         population = surviving_population;
     }
 
-    // 3. Selecionar o melhor indivíduo da população final
+    auto final_fitness_values = evaluate_population(population);
     int best_fitness = INT_MAX;
     int best_idx = 0;
     for (int i = 0; i < (int)population.size(); i++) {
-        int fitness = evaluateFitness(population[i]);
-        if (fitness < best_fitness) {
-            best_fitness = fitness;
+        if (final_fitness_values[i] < best_fitness) {
+            best_fitness = final_fitness_values[i];
             best_idx = i;
         }
     }
@@ -799,7 +906,8 @@ bool LNS::generateNeighborByGeneticAlgorithm(int population_size, int num_genera
         return false;
 
     if (screen >= 2)
-        cout << "Generate " << neighbor.agents.size() << " neighbors by genetic algorithm" << endl;
+        cout << "Generate " << neighbor.agents.size() << " neighbors by parallel genetic algorithm using "
+             << requested_threads << " threads" << endl;
     return true;
 }
 
@@ -940,6 +1048,62 @@ int LNS::evaluateFitness(const vector<int>& individual) {
 
     // No restore needed — global agents and path_table were never modified
     return fitness;
+}
+
+int LNS::evaluateFitnessThreadSafe(const vector<int>& individual) const {
+    int current_sum_of_costs = sum_of_costs;
+
+    // Create local copy of path_table to avoid affecting global state
+    PathTable local_path_table = path_table;
+
+    // Save original paths and calculate old cost
+    vector<Path> original_paths(individual.size());
+    int old_individual_cost = 0;
+    for (int i = 0; i < (int)individual.size(); i++) {
+        original_paths[i] = agents[individual[i]].path;
+        old_individual_cost += (int)agents[individual[i]].path.size() - 1;
+    }
+
+    // Remove paths from local path_table
+    for (int i = 0; i < (int)individual.size(); i++) {
+        local_path_table.deletePath(individual[i], original_paths[i]);
+    }
+
+    // Replan using PP on local_path_table (does not modify global agents or path_table)
+    int new_individual_cost = 0;
+    bool success = true;
+    vector<Path> new_paths(individual.size());
+
+    for (int i = 0; i < (int)individual.size(); i++) {
+        int id = individual[i];
+        SpaceTimeAStar local_solver(instance, id);
+        Path new_path = local_solver.findOptimalPath(local_path_table);
+        if (new_path.empty()) {
+            success = false;
+            break;
+        }
+        new_paths[i] = new_path;
+        new_individual_cost += (int)new_path.size() - 1;
+        local_path_table.insertPath(id, new_path);
+    }
+
+    // Calculate fitness
+    int fitness;
+    if (success) {
+        fitness = current_sum_of_costs - old_individual_cost + new_individual_cost;
+    } else {
+        fitness = INT_MAX;
+    }
+
+    // No restore needed — global agents and path_table were never modified
+    return fitness;
+}
+
+void LNS::updateMakespan()
+{
+    makespan = 0;
+    for (const auto& agent : agents)
+        makespan = std::max(makespan, agent.getNumOfDelays());
 }
 
 int LNS::findMostDelayedAgent(){
@@ -1110,7 +1274,7 @@ void LNS::writeIterStatsToFile(string file_name) const {
 }
 
 void LNS::writeResultToFile(string file_name) const {
-    const string result_header = "runtime,solution cost,initial solution cost,min f value,root g value,"
+    const string result_header = "runtime,solution cost,makespan,initial solution cost,min f value,root g value,"
                                  "iterations,group size,runtime of initial solution,area under curve,"
                                  "preprocessing runtime,solver name,instance name,"
                                  "agents,destoryStrategy,gaPopSize,gaGenerations,gaMutationRate,"
@@ -1170,13 +1334,13 @@ void LNS::writeResultToFile(string file_name) const {
         }
         auc += (prev->sum_of_costs - sum_of_distances) * (time_limit - prev->runtime);
     }
-    stats << runtime << "," << sum_of_costs << "," << initial_sum_of_costs << "," <<
+    stats << runtime << "," << sum_of_costs << "," << makespan << "," << initial_sum_of_costs << "," <<
             max(sum_of_distances, sum_of_costs_lowerbound) << "," << sum_of_distances << "," <<
             iteration_stats.size() << "," << average_group_size << "," <<
             initial_solution_runtime << "," << auc << "," <<
             preprocessing_time << "," << getSolverName() << "," << instance.getInstanceName() << "," <<
             instance.getDefaultNumberOfAgents() << "," << destory_name << ",";
-    if (destory_name == "GeneticAlgo")
+    if (destory_name == "GeneticAlgo" || destory_name == "GeneticAlgoParallel")
     {
         stats << ga_population_size << "," << ga_num_generations << "," << ga_mutation_rate << ",";
     }

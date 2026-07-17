@@ -36,13 +36,15 @@ int main(int argc, char** argv)
         ("replanAlgo", po::value<string>()->default_value("PP"),
                 "MAPF algorithm for replanning (EECBS, CBS, PP)")
         ("destoryStrategy", po::value<string>()->default_value("Adaptive"),
-                "Heuristics for finding subgroups (Random, RandomWalk, Intersection, GeneticAlgo, Adaptive)")
+            "Heuristics for finding subgroups (Random, RandomWalk, Intersection, GeneticAlgo, GeneticAlgoParallel, Adaptive)")
         ("gaPopSize", po::value<int>()->default_value(8),
                 "Population size for Genetic Algorithm destroy strategy")
         ("gaGenerations", po::value<int>()->default_value(3),
                 "Number of generations for Genetic Algorithm destroy strategy")
         ("gaMutationRate", po::value<double>()->default_value(0.20),
                 "Mutation rate for Genetic Algorithm destroy strategy (0.0 to 1.0)")
+        ("num_threads", po::value<int>()->default_value(1),
+            "number of threads used by the parallel genetic algorithm")
         ("pibtWindow", po::value<int>()->default_value(5),
              "window size for winPIBT")
         ("winPibtSoftmode", po::value<bool>()->default_value(true),
@@ -80,7 +82,8 @@ int main(int argc, char** argv)
                 vm["maxIterations"].as<int>(), screen, pipp_option,
                 vm["gaPopSize"].as<int>(),
                 vm["gaGenerations"].as<int>(),
-                vm["gaMutationRate"].as<double>());
+                vm["gaMutationRate"].as<double>(),
+                vm["num_threads"].as<int>());
         bool succ = lns.run();
         if (succ)
             lns.validateSolution();
